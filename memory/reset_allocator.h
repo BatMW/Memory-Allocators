@@ -1,58 +1,112 @@
 #ifndef MEM_RESET_ALLOCATOR
 #define MEM_RESET_ALLOCATOR
-#include "stddef.h"
+#include <stddef.h>
+#include <stdint.h>
 
-typedef struct MEM_Reset_Allocator{
-  void* base;
-  void* top;
+#define IS_POW2(a) ((a) && (((a) & ((a) - 1))  == 0))
+#define ALIGN_UP(x, a)   (((x) + ((a) - 1)) & ~((a) - 1))
+#define ALIGN_DOWN(x, a) ((x) & ~((a) - 1))
+#define IS_ALIGNED(x, a) (((uintptr_t)(x) & ((a) - 1)) == 0)
+
+struct Reset_Allocator{
+  uintptr_t base;
+  uintptr_t top;
   size_t size;
   size_t failed_allocs;
-} MEM_Reset_Allocator;
+};
 
 /*
- * Tries to allocate 'size' bytes for the allocator.
- * MEM_Reset_Allocator.base == 0 if allocation was unsuccessful.
+ * Initialize an allocator with given memory and size.
 */
-MEM_Reset_Allocator MEM_reset_allocator_init(size_t size);
+struct Reset_Allocator reset_allocator_init(void* mem, size_t size){
+  struct Reset_Allocator allocator;
+  allocator.base = (uintptr_t)mem;
+  allocator.top = allocator.base;
+  allocator.size = size;
+  allocator.failed_allocs = 0;
+  return allocator;
+}
 
 /*
  * Tries to allocate 'size' bytes of memory.
  * Returns NULL if unsuccessful.
 */
-void* MEM_reset_allocator_alloc(MEM_Reset_Allocator* allocator, size_t size);
+void* reset_allocator_alloc(struct Reset_Allocator* allocator, size_t size){
+  if(allocator == NULL || size == 0){
+    return NULL;
+  }
+  uintptr_t limit = allocator->base + allocator->size;
+  if (allocator->top > limit || size > (limit - allocator->top)){
+    allocator->failed_allocs++;
+    return NULL;
+  }
+  uintptr_t ret = allocator->top;
+  allocator->top = allocator->top + size;
+  return (void*)ret;
+}
 
 /*
  * Tries to allocate 'size' bytes of aligned memory.
  * Returns NULL if unsuccessful.
 */
-void* MEM_reset_allocator_aligned_alloc(MEM_Reset_Allocator* allocator, size_t size, size_t align);
+void* reset_allocator_aligned_alloc(struct Reset_Allocator* allocator, size_t size, size_t align){
+  if(!IS_POW2(align)){
+    return NULL;
+  }
+  if(allocator == NULL || size == 0 || allocator->base == (uintptr_t)NULL){
+    return NULL;
+  }
 
+  uintptr_t aligned_top = ALIGN_UP(allocator->top, align);
+  uintptr_t limit = allocator->base + allocator->size;
+
+  if (aligned_top > limit || size > (limit - aligned_top)) {
+      allocator->failed_allocs++;
+      return NULL;
+  }
+
+  uintptr_t ret = aligned_top;
+  allocator->top = (aligned_top + size);
+  return (void*)ret;
+}
 
 /*
  * Resets the 'top' pointer to equal base.
  * No pointers allocated before reset should not be used.
 */
-void MEM_reset_allocator_reset(MEM_Reset_Allocator* allocator);
+void reset_allocator_reset(struct Reset_Allocator* allocator){
+  if(allocator == NULL){
+    return;
+  }
+  allocator->top = allocator->base;
+  allocator->failed_allocs = 0;
+}
 
 /*
- * Frees all memory and sets all pointers to NULL.
+ * Returns the amount of space used
 */
-void MEM_reset_allocator_destroy(MEM_Reset_Allocator* allocator);
-
-#ifndef MEM_FUNC_ALIGN_ADDR
-#define MEM_FUNC_ALIGN_ADDR
-#include "stdint.h"
-#include "assert.h"
-
-static inline void* align_address(void* addr, size_t align) {
-    assert((align & (align - 1)) == 0); // must be power of two
-    uintptr_t ptr = (uintptr_t)addr;
-    uintptr_t aligned = (ptr + align - 1) & ~(uintptr_t)(align - 1);
-    return (void*)aligned;
+size_t reset_allocator_used(struct Reset_Allocator* allocator) {
+    return allocator->top - allocator->base;
 }
-#endif // align_address
 
-#ifdef UNITY_BUILD
-#include "reset_allocator.c"
-#endif //UNITY_BUILD
+
+/*
+ * Sets all pointers to NULL.
+*/
+void reset_allocator_destroy(struct Reset_Allocator* allocator){
+  if(allocator == NULL){
+    return;
+  }else if (allocator->base == (uintptr_t)NULL){
+    return;
+  }
+  allocator->base = (uintptr_t)NULL;
+  allocator->top = (uintptr_t)NULL;
+  allocator->size = 0;
+}
+
+
+#undef IS_POW2
+#undef ALIGN_UP
+#undef ALIGN_DOWN
+#undef IS_ALIGNED
 #endif

@@ -11,3 +11,5 @@
 #precompiled headers
 *.gch
 *pch
+
+*.json
